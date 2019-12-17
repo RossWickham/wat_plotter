@@ -95,7 +95,7 @@ gatherpathsToSQL <- function(baseDir,extractCSVFiles,isFRA){
   tblNames <- RSQLite::dbListTables(sqlDB) 
   
   if( any( in_paths %in% tblNames) )
-    warning(sprintf("\n\nDetected some SQL tables that have already been processed, skipping:\n\t%s",
+    cat(sprintf("\n\nDetected some SQL tables that have already been processed, skipping:\n\t%s",
                     paste0(in_paths[in_paths %in% tblNames],collapse="\n\t")))
   in_paths <- in_paths[in_paths %!in% tblNames]
   if( length(in_paths) == 0 ) return(NULL) #breaking if already processed all required paths
@@ -124,7 +124,7 @@ gatherpathsToSQL <- function(baseDir,extractCSVFiles,isFRA){
       cat(sprintf("\nSaving %s\t[%4g/%4g]", names(tsc)[i], i, length(tsc)))
       
       
-      tblName <- names(tsc)[i] #the DSS path
+      tblName <- toupper(names(tsc)[i]) #the DSS path
       pathCPart <- strsplit(tblName,"/")[[1]][4] #extracting the C part from the DSS pathname
       saveData <- tsc[[i]] #data to be saved
       

@@ -1,14 +1,63 @@
+### Saving ########
 
 
-#translation between how determinstic fcst DSS are stored and FRA
-fcstBPartKey <- data.frame(det=c("ARDB","BRN","DCDB","DWR",
-                                 "HGH","LIB","MCDB","TDA"),
-                           fra=c("ARROW LAKES_IN", "BROWNLEE_IN","DUNCAN_IN","DWORSHAK_IN",
-                                 "HUNGRY HORSE_IN","LIBBY_IN","MICA_IN","THE DALLES_IN"),
-                           stringsAsFactors = F)
+getSaveFileName <- function(ext){
+  #Retrieves the file name to save to, using the appropriate extension
+  saveFileName <- file.choose()
+  
+  if(!exists(saveFileName)) return(NULL)
+  
+  
+  #concatenate extension if it isn't on the file
+  if(right(saveFileName,nchar(ext)) != ext ) saveFileName <- cat(saveFileName,ext)
+  return(saveFileName)
+}
 
 
-### Excel #################
+saveDataWrapper <- function(file_path, allData){
+  #Updates the global object that stores the currently desired plot data ('allData')
+  # Uses 'cPathConfig' to determine what needs to be updated
+  #allData is a nested list by alternative that has both data and
+  #  metadata info
+  
+  #Check if the data has been created yet.  If not, create
+  # if( "data" %!in%  names(allData)){
+  #   cat("\nInitializing time series data storage in memory")
+  #   allData$data <- list()
+  # }
+  
+  connIndex <- which(file_path == conns$file_path)
+  
+  connection_name <- conns$connection_name[connIndex]
+  alt <- conns$alt[connIndex]
+  file_format <- conns$file_format[connIndex]
+  
+  
+  allDataPaths <- names(allData$data[[alt]])                 #paths in allData for current alt
+  connPaths <- pathConfig$allPaths[[connection_name]]$paths  #connection path names
+  
+  #Get which paths need to be saved  Skip if none
+  unSavedPaths <- allDataPaths[ allDataPaths %!in% connPaths ]
+  if( length(unSavedPaths)==0 ){
+    cat(sprintf("\nNo new data to save for %s", file_path))
+    return(NULL)
+  }
+  
+  if( file_format == "SQL" ){
+    #Save to SQL if tables not yet created
+    save_SQL( file_path=file_path, dfList=allData$data[[alt]] )
+    
+  }else if( file_format == "DSS" ){
+    save_DSS( file_path=file_path, dfList=allData$data[[alt]] )
+  }
+  
+} 
+
+
+### _HTML ######################
+
+
+### _Excel #################
 
 loadXLTables <- function(xlFileName){
   #Loads the Qout - tailwater elevation rating 
@@ -19,6 +68,129 @@ loadXLTables <- function(xlFileName){
   out <- lapply(X = allSheets, function(x) readWorksheet(wb,x))
   names(out) <- allSheets
   return(out)
+}
+
+convertDatesToChar <- function(saveDF){
+  #converts dates to character prior to save, so Excel doesn't interpret the wrong
+  saveDF[,names(saveDF) %in% c("wyDate")] <- as.character(saveDF[,names(saveDF) %in% c("wyDate")])
+  return(saveDF)
+}
+
+### TODO #######
+#Make Excel function for each compute_type - use copyFun if needed
+
+saveExcel <- function(allData, plotData, opts,showProgress=F){
+  #Iterate thoguh each plot, and save to Excel
+  
+  
+  
+  saveFileName <- opts$saveFileName
+  if(saveFileName=="") saveFileName <- "test.xlsx"
+  cat(sprintf("\nSaving Excel to:\t %s", saveFileName))
+  saveFileName <- sprintf("%s/test_output/%s",getwd(),saveFileName)
+  
+  wb <- loadWorkbook(saveFileName,create=T)
+  
+  createSheet(wb,"all_data")
+  
+  #Increment to increase load bar
+  #1/(<no. plots>*<no. alts>) : ignoring number of paths
+  incPerPath <- 1/(length(plotData$meta)*length(opts$selectedAlts)*2)
+
+  startCol <- 1 #iniitalizing start column
+  for( k in 1:length(plotData$meta) ){   #iterate through each plot
+    plotInfo <- plotData$meta[[k]]
+    
+    for(alt in opts$selectedAlts ){ #  and each alternative
+      
+      plotType <- plotInfo$plotType
+      computeType <- allData$meta[[alt]]$compute_type
+      
+      # #call function by name onto the dataset, returns dataframe
+      # plotFunName <- gsub(" ","",sprintf("plotly_%s_%s", plotType,computeType))
+      # 
+      # cat(sprintf("\nplotFunName:\t%s",plotFunName))
+      # if( !exists(plotFunName) ){
+      #   cat(sprintf("\nPlotly function for plot type '%s' and compute type '%s' does not yet exist, skipping",
+      #               plotType, computeType))
+      #   next
+      # }
+      # 
+      
+      
+      
+      #pull out the path data
+      pData <- plotData$data[[plotInfo$plotType]][[plotInfo$paths[1]]][[alt]]$data
+      
+      if( is.list(pData) ){
+        
+        for( pDataName in names(pData) ){
+          #write header info - alt, computeType, plotType, path
+          writeWorksheet(object = wb, data = data.frame(x=c(alt,computeType,plotType,plotInfo$paths[1],pDataName)),
+                         sheet = "all_data",startRow = 1, startCol = startCol, header = F, rownames = F)
+          
+          #write data to Excel sheet
+          writeWorksheet(object = wb, data = convertDatesToChar(pData[[pDataName]]),
+                         sheet = "all_data",startRow = 8, startCol = startCol, header = T, rownames = F)
+          #advance start column
+          startCol <- startCol + ncol(pData[[pDataName]]) + 2
+        }
+        
+       
+        
+      }else{
+        
+        #write header info - alt, computeType, plotType, path
+        writeWorksheet(object = wb, data = data.frame(x=c(alt,computeType,plotType,plotInfo$paths[1])),
+                       sheet = "all_data",startRow = 1, startCol = startCol, header = F, rownames = F)
+        
+        #write data to Excel sheet
+        writeWorksheet(object = wb, data = convertDatesToChar(pData),
+                       sheet = "all_data",startRow = 8, startCol = startCol, header = T, rownames = F)
+        #advance start column
+        startCol <- startCol + ncol(pData) + 2
+        
+      }
+      
+
+      
+
+      
+      #Functions defined under associated section in 'plot_plotly' script
+      # pList[[k]] <- eval(call(name =plotFunName,pList[[k]],plotData,alt,plotInfo,init))
+      # pList[[k]] <- addXaxisLayout(pList[[k]],plotInfo)
+      
+      
+      # if(showProgress) incProgress(incPerPath)
+    }
+    init <- T
+  }
+  
+  saveWorkbook(wb)
+  # return(
+  #   plotly::subplot(pList,nrows = length(pList),
+  #                   shareX = T, titleY = T, widths = 1)
+  # )
+  # }
+}
+
+
+### DSS - General ##############
+
+getAllPathsFromFile <- function(dssFileName){
+  require(dssrip)
+  dssFile <- opendss(dssFileName)
+  allPaths <- getPaths(dssFile)
+  dssFile$done()
+  return(allPaths)
+}
+
+
+### DSS -Save ####################
+
+
+save_DSS <- function(file_path, dfList){
+  cat("\nFunction to save to DSS is not yet completed")
 }
 
 
@@ -226,7 +398,7 @@ makePairedDataContainer <-
     }
     
     return(pdc)
-    } #End function makePairedDataContainer
+  } #End function makePairedDataContainer
 
 
 
@@ -242,12 +414,12 @@ loadPDCtoDF_wildcardPath <- function(in_path, dssFileName) {
   if(length(selectedPaths) > 1)
     stop(sprintf( paste0("\n\tloadPDCtoDF_wildcardPath:\tNon-unique",
                          " pathname found when searching:\t%s\nDSS path matches:\n\t%s"),
-                 in_path, paste0(selectedPaths, collapse="\n\t")))
+                  in_path, paste0(selectedPaths, collapse="\n\t")))
   if(length(selectedPaths) == 0)
     stop(sprintf("\nNo unique matches found for wildcard DSS path:\t%s", in_path))
   
   pdcToDF(loadPDC(selectedPaths, dssFile))
-  }
+}
 
 
 #wrapper to read in paired data container as a dataframe
@@ -296,18 +468,28 @@ pdcToTS <- function(in_path, eventYr,dssFileName){
   return(meltDF)
 }
 
+### DSS -TSC ##############################
 
-loadMergedFRADSS <- function( in_paths, dssFileName  ){
+
+
+
+
+loadMergedFRADSS <- function( in_paths, dssFileName, compute_type  ){
   #Loads from a merged FRA DSS file, where all data are in one 
   #  DSS file, given the fully qualified path of the file name
   #  e.g., like gatherpaths-extracted
   
   cat(sprintf("\nLoading path(s):\n\t%s",paste0(in_paths,collapse="\n\t")))
   
-  #Form path regular expression from gatherpaths-like format
-  pathRegExs <- formPORPathRegEx(in_paths) #only difference from POR load
-  
   #Iterate through paths
+  if( toupper(compute_type)=="DETERMINISTIC"){
+    pathRegExs <- formQAMetricRegEx(in_paths)
+  }else if( toupper(compute_type)=="FRA"){
+    pathRegExs <- formFRARegEx(in_paths)
+  }else if(toupper(compute_type)=="POR"){
+    #Form path regular expression from gatherpaths-like format
+    pathRegExs <- formPORPathRegEx(in_paths) #only difference from POR load
+  }
   tscList <- lapply(pathRegExs, extractTSCbyRegEx,dssFileName=dssFileName)
   
   #formatting to generic data format used in tool 
@@ -316,9 +498,9 @@ loadMergedFRADSS <- function( in_paths, dssFileName  ){
     warning(paste0("\nNo data read for provided path expressions in DSS file (%s):\n\t%s",
                    dssFileName, paste0(in_paths,collapse="\n\t")))
     return(NULL)
-    }
+  }
   
-  if( str_detect(tscList[[nonNullElement]]$F[1],"\\d{6}") ){
+  if( str_detect(tscList[[which(nonNullElement)[1]]]$F[1],"\\d{6}") ){
     tscList <- lapply(tscList,formatMergedDSS)
   }else{
     tscList <- lapply(tscList,formatDSS)
@@ -331,18 +513,37 @@ loadMergedFRADSS <- function( in_paths, dssFileName  ){
 }
 
 formatMergedDSS <- function(df){
+  #For gatherpaths DSS
   #input is a dataframe as read from the 'extractTSCbyRegEx' function
   #output is a dataframe with path part columns removed (A-F, abc)
   # and a new event column corresponding to the event
   if(is.null(df)) return(NA)
   if(nrow(df)==0 ) return(NA)
+  #Convert to Date if 1DAY timesteps
+  # if( diff(df$date[1:2]) == 86400) df$date <- as.Date(df$date)
   df$event <- as.numeric(str_extract_all(df$F,"\\d{6}",T))
   df[,c(LETTERS,"abc")] <- NULL
+  df <- df[!duplicated(df$date),]
   return(df)
 }
 
+formatDSS <- function(df){
+  #For QA Metrics and POR datasets
+  #input is a dataframe as read from the 'extractTSCbyRegEx' function
+  #output is a dataframe with path part columns removed (A-F, abc)
+  # and a new event set to NA
+  if(is.null(df)) return(NA)
+  if(nrow(df)==0 ) return(NA)
+  #Convert to Date if 1DAY timesteps
+  # if( diff(df$date[1:2]) == 86400) df$date <- as.Date(df$date)
+  df$event <- wateryear(df$date) #Map the year to the event
+  df[,c(LETTERS,"abc")] <- NULL
+  df <- df[!duplicated(df$date),]
+  return(df)
+}
 
 formPORPathRegEx <- function(in_paths){
+  #For reading the DSS files in the POR folders (e.g., POR 29-47)
   #From the gatherpaths-like format of pathnames
   # (e.g., //MCNARY_OUT/FLOW//1DAY/FLOODMODEL1/)
   # converts to a regular expression, that can 
@@ -354,6 +555,16 @@ formPORPathRegEx <- function(in_paths){
   newFParts <- paste0("*",sapply(fParts,replaceStringFromDict),"*")
   outPaths <- replacePathParts(in_paths,"f",newFParts) #New F parts
   replacePathParts(outPaths,"d","*")                   #D parts to wildcard
+}
+#These two are the same
+formFRARegEx <- formPORPathRegEx
+
+
+formQAMetricRegEx <- function(paths){
+  #format paths with an asterisk in the D part and
+  #  a wildcard operator prefix in the F part (e.g., *FLOODMODEL1)
+  out <- replacePathParts(paths = paths,part = "D",replacements = "*")
+  replacePathParts(paths = out,part = "F",replacements = paste0("*", getPathParts(out,"F")))
 }
 
 
@@ -534,7 +745,7 @@ extractTSCbyRegEx <- function(pathRegEx, dssFileName){
       if(k %% 1000 == 0) cat(sprintf("\n[%6g/%6g]", k , lenPaths))
       
       path <- paths[k]
-
+      
       
       tsc<-try(dssFile$get(path))
       
@@ -551,6 +762,10 @@ extractTSCbyRegEx <- function(pathRegEx, dssFileName){
                              F = pathSplit$F[k],
                              value = tsc$values,
                              stringsAsFactors=F)
+      
+      #Correction for daily data
+      if(unique(pathSplit$E[k])=="1DAY")
+        out[[k]]$date = out[[k]]$date-86400
     }
     
     out <- bind_rows(out)
@@ -596,7 +811,7 @@ extractTSCbyRegEx <- function(pathRegEx, dssFileName){
     
     #retrieving data
     longDF <- compileTSC(paths = selectedPaths, dssFile = dssFile)
-    dssFile$close() #done with dss file
+    dssFile$done() #done with dss file
     
     #Making new column of merged A/B/C compenents, accounting for missing A parts
     longDF <- addABCColumn(longDF)
@@ -608,114 +823,224 @@ extractTSCbyRegEx <- function(pathRegEx, dssFileName){
   # wideDF <- dcast(longDF, date ~ abc, value.var="value")
 }
 
+### SQL #################
 
 
-### Forecast #######################
+dbReadTable_tblNameFirst <- function(tblName, db) dbReadTable(db, tblName)
+
+
+mergeSQLRawWithAddlInfo <- function(rawDF, addlInfoList){
+  #Appends additional metadata colums as loaded from the sql file
+  addlInfo <- addlInfoList[[sprintf("addlInfo_%s",as.character(nrow(rawDF)))]]
+  #Making interprettable as dae
+  addlInfo$date <- as.POSIXct(addlInfo$date,origin="1970-01-01",tz="GMT") 
+  bind_cols(addlInfo,rawDF)
+}
+
+readSQLTbls <- function(file_path, paths){
+  #Loads from an SQLite database
+  db <- dbConnect(RSQLite::SQLite(),file_path)
+  #check that the table exists in the file
+  missingTbls <- paths[paths %!in% RSQLite::dbListTables(db)]
+  if( length(missingTbls) > 0 ){
+    cat(sprintf("Missing the following tables from database:\n\t%s",
+                paste0(missingTbls,collapse="\n\t")))
+    paths <- paths %!in% missingTbls #reduce to tables that do exist
+    if(length(paths)==0) return(NA)     #return NA if no data
+  }
+  suppressWarnings( #suppress warnings to close db after each read
+    out <- Map(dbReadTable_tblNameFirst, paths, list(db))
+  )
+  #Appending appropriate additional info, saved in sql
+  uniqueRows <- as.character(unique(sapply(out,nrow)))
+  addlInfoList <- Map(dbReadTable_tblNameFirst,
+                      sprintf("addlInfo_%s",uniqueRows),
+                      list(db))
+  out <- lapply(out, mergeSQLRawWithAddlInfo,addlInfoList=addlInfoList )
+  # if(length(paths)==1) out <- out[[1]]
+  dbDisconnect(db) 
+  return(out)
+}
+
+
+save_SQL <- function(file_path, dfList){
+  #Saves a list of dataframes to SQL given the SQL file path
+  
+  #Opening connection to sql db, creating save directory if needed
+  sqlDBFileName <- file_path
+  if(!dir.exists(dirname(sqlDBFileName))) dir.create(dirname(sqlDBFileName),recursive = T)
+  sqlDB <- dbConnect(SQLite(), dbname = sqlDBFileName)
+  
+  for( path in names(dfList) ){
+    #extracting initial table names for comparison, returns character vector of length zero if no tables
+    tblNames <- RSQLite::dbListTables(sqlDB) 
+    
+    cat(sprintf("\nPath:\t%s", path))
+    if( path %in% tblNames ) next
+    
+    pathCPart <- getPathPart(path,"c")
+    #rounding to desired decimal precision, matching in the 'roundPrecision' dataframe by C part 
+    #  using regular expr
+    prec <- roundPrecision$prec[roundPrecision$cPart=="DEFAULT"] #Setting to default initially
+    #Checking if there is a partial C part match in the defined precision df
+    for( cPart in roundPrecision$cPart  ) 
+      if( grepl(cPart,pathCPart) & cPart != "DEFAULT")
+        prec <- roundPrecision$prec[roundPrecision$cPart==cPart]
+    
+    saveData <- as.data.frame(dfList[[path]])
+    saveData$value <- round(saveData$value,prec) #rounding, using specified precision
+    
+    #writing to database
+    dbWriteTable(conn = sqlDB, name = path, value = data.frame(value=saveData$value),overwrite=F)
+    
+    #Writing additonal info if needed
+    #appending number of rows as identifier to table name for loading later
+    addlInfoTblName <- sprintf("addlInfo_%s",nrow(saveData)) #as string so doesn't write in scientific notation
+    
+    if( addlInfoTblName %!in% tblNames )
+      dbWriteTable(conn = sqlDB, name = addlInfoTblName,
+                   value = saveData[,addlInfoCols], overwrite=F) 
+    
+  }
+  
+  dbDisconnect(sqlDB) #close connection
+}
+
+
+### Load Available Data  #######################
+#Retrieve connections ad determine available plottinn
+
+getConnections <- function(sheetName){
+  #Reads the config/connections Excel and reads in uncommented rows
+  require(XLConnect)
+  wb <- loadWorkbook("config/connections.xlsx")
+  if(sheetName %!in% getSheets(wb))
+    stop(sprintf("\ngetConnections:\tNo sheet '%s' found in Excel file config/connections.xlsx.", sheetName))
+  
+  #initial read of commented lines
+  rawRead <-  readWorksheet(object = wb,sheet = sheetName,header=F)
+  #re-read, dropping commented rows
+  readWorksheet(object = wb,sheet = sheetName,startRow = sum(left(rawRead[,1],1)=="#",na.rm=T)+1,header=T)
+}
+
+
+
+
+### Forecast ###################
+
+
 
 loadFcsts <- function(){
   #Returns a nested list of forecasts for both the
   # 5k and 50k runs by project.  primary list elements
   #  will be named after DSS files
-  
   #Where the forecasts DSS data are relative to the base directory of R project
   #  modify here as needed if there are other versions of forecast files (i.e.,
   #  if the hydrologic sampler is changed for some reason)
   fcstDSSFiles <- c("dss/fcsts/fiveK.dss", "dss/fcsts/fiftyK.dss","dss/fcsts/80yr.dss")
   # fcstDSSFiles <- dir(path = "dss/fcsts",patter="*.dss$",full.names = T) #if new DSS are added
   
+  #NOTE: forecast data are chaced in the config/cached folder.  If changes to this function
+  #  are made, then it might be beneficial to remove/rename the fcsts.RData file
   
-  out <- list()
-  
-  for( dssFileName in fcstDSSFiles ){
-    
-    listIndex <- which(dssFileName == fcstDSSFiles) #list index in out object
-    
-    dssFile <- opendss(dssFileName) #loading DSS file and retrieving paths
-    allPaths <- getAllPaths(dssFile)
-    
-    #reducing only to forecasts, assuming the all have the same B part format: <project name>_IN
-    # fcstPaths <- grep(pattern = "_IN",x = allPaths, value = T)
-    #removing text paths
-    fcstPaths <- grep(pattern = "^(?!.*TEXT)",x = allPaths, perl = T,value=T)
-    #removing event-year pairings from hydrologic sampler
-    fcstPaths <- grep(pattern = "^(?!.*CRT_HS/EVENT)",x = fcstPaths, perl = T,value=T)
-    
-    #If 80 year, need to read in time serse
-    if( grepl("80yr|deterministic",basename(dssFileName)) ){
-      #remove observed forecasts
-      fcstPaths <- grep(pattern = "^(?!.*OBSV)",x = fcstPaths, perl = T,value=T)
-      #Only read in paths associated with fcstBPartKey$det
-      fcstPaths <- grep(pattern = paste0(fcstBPartKey$det,collapse="|"), fcstPaths,value=T)
-      out[[listIndex]] <- getDeterminsticFcsts(fcstPaths,dssFile)
-      
-      
-      
-      #If FRA, can read in as paired data containers
-    }else{
-      #reading in paired data containers as dataframes and naming list elements by B part of DSS path
-      out[[listIndex]] <- lapply(fcstPaths, loadPDCtoDF, dssFile=dssFile)
-      #renaming 'x' column to 'event' in each pdc
-      out[[listIndex]] <- renameColsInDFList(out[[listIndex]],"x","event")
-      names(out[[listIndex]]) <- getPathParts(fcstPaths, "b")
+  #If cached forecast RData, load and check that nothing new has been added
+  out <- NULL
+  updateFcsts <- T
+  if( file.exists(cachedFcstFile) ) {
+    cat("\n\t\tLoading cached forecast data")
+    load(cachedFcstFile)
+    #Check that all of the files being loaded match
+    if(any(removeFileExtension(fcstDSSFiles) %!in% names(out))){updateFcsts <- T; break}
+    #Check all the last modified times match
+    for( k in length(out) ){
+      oldTime <- out[[k]]$mTime
+      newTime <- file.mtime(fcstDSSFiles[removeFileExtension(fcstDSSFiles)==names(out)[k]])
+      if(newTime > oldTime) {updateFcsts <- T; break}
     }
-    
-    
-    dssFile$done()
+    updateFcsts <- F
   }
   
-  names(out) <- removeFileExtension(fcstDSSFiles) #naming after DSS files without file extensions
+  
+  #If needs updating, reload and re-save
+  if(updateFcsts){
+    cat("\n\t\tUpdating forecast data - detected change in file name(s) or modification of file")
+    out <- list()
+    for( dssFileName in fcstDSSFiles ){
+      listIndex <- which(dssFileName == fcstDSSFiles) #list index in out object
+      dssFile <- opendss(dssFileName) #loading DSS file and retrieving paths
+      allPaths <- getPaths(dssFile)
+      #reducing only to forecasts, assuming the all have the same B part format: <project name>_IN
+      # fcstPaths <- grep(pattern = "_IN",x = allPaths, value = T)
+      #removing text paths
+      fcstPaths <- grep(pattern = "^(?!.*TEXT)",x = allPaths, perl = T,value=T)
+      #removing event-year pairings from hydrologic sampler
+      fcstPaths <- grep(pattern = "^(?!.*CRT_HS/EVENT)",x = fcstPaths, perl = T,value=T)
+      
+      #If 80 year, need to read in time series
+      if( grepl("80yr|deterministic",basename(dssFileName)) ){
+        #remove observed forecasts
+        fcstPaths <- grep(pattern = "^(?!.*OBSV)",x = fcstPaths, perl = T,value=T)
+        #Only read in paths associated with fcstBPartKey$det
+        fcstPaths <- grep(pattern = paste0(fcstBPartKey$det,collapse="|"), fcstPaths,value=T)
+        
+        out[[listIndex]] <- getDeterminsticFcsts(fcstPaths,dssFile)
+        
+        #Removing 'dates ' part of column names
+        out[[listIndex]] <- lapply(out[[listIndex]], function(x) {names(x) <- gsub("dates ","",names(x));return(x)})
+        
+        #If FRA, can read in as paired data containers
+      }else{
+        #reading in paired data containers as dataframes and naming list elements by B part of DSS path
+        out[[listIndex]] <- lapply(fcstPaths, loadPDCtoDF, dssFile=dssFile)
+        
+        #renaming 'x' column to 'event' in each pdc
+        out[[listIndex]] <- renameColsInDFList(out[[listIndex]],"x","event")
+        names(out[[listIndex]]) <- getPathParts(fcstPaths, "b")
+        
+        #Removing 'dates ' part of column names
+        out[[listIndex]] <- lapply(out[[listIndex]], function(x) {names(x) <- gsub("dates ","",names(x));return(x)})
+      }
+      
+      
+      
+      out[[listIndex]]$mTime <- file.mtime(dssFileName)
+      
+      dssFile$done()
+    }
+    
+    #Reducing only to common forecasts (and mTime element) between all compute types (list elements)
+    namesInAllFcsts <- getCommonNamesInList(out)
+    out <- lapply(out,function(x) x[namesInAllFcsts])
+    
+    #Divide by 1,000
+    out <- lapply(out, function(dfList) lapply(dfList,
+                                                function(x) {
+                                                  if(is.data.frame(x)){
+                                                    fcstCols <- grepl(paste0(month.abb,collapse="|"),names(x))
+                                                    # x[,fcstCols] <- round(x[,fcstCols]/1000,3)
+                                                    x[,fcstCols] <- x[,fcstCols]/1000
+                                                  }
+                                                  return(x)
+                                                }  ))
+    
+    names(out) <- removeFileExtension(fcstDSSFiles) #naming after DSS files without file extensions
+    save(out,file = cachedFcstFile)
+  }
+  
   return(out)
+}
+
+
+roundFcstTbl <- function(fcstTbl,prec=0){
+  #Rounds a forecast table where the names
+  fcstCols <- grepl(paste0(month.abb,collapse="|"),names(fcstTbl))
+  fcstTbl[,fcstCols] <- round(fcstTbl[,fcstCols],prec)
+  return(fcstTbl)
 }
 
 
 
 ### General ##########
-
-
-getAvailableSQLdb <- function(searchDirs,sqlDbFiles=NULL,nDeep=3){
-  nDeep=nDeep-1
-  #getting sqlite database files
-  sqlDbFiles <- c(sqlDbFiles,grep("*\\.sql$",dir(searchDirs,full.names=T),value = T))
-  #removing archived files
-  sqlDbFiles <- sqlDbFiles[grepl("[?!^OLD]",sqlDbFiles,perl = T)]
-  sqlDbFiles <- sqlDbFiles[grepl("[?!^archive]",sqlDbFiles,perl = T)]
-  if(nDeep==0){
-    return(sqlDbFiles)
-  }else{
-    return(getAvailableSQLdb(dir(searchDirs,full.names=T),sqlDbFiles,nDeep))
-  }
-}
-
-getAvailableQAMetricsFiles <- function(){
-  qaFiles <- sapply(dir(deterministicDirs,full.names=T),dir,pattern="QAMetrics.*.dss",full.names=T,simplify=T)
-  #removing archived files
-  qaFiles <- qaFiles[grepl("[?!^archive]",qaFiles,perl = T)]
-  as.character(qaFiles[sapply(qaFiles,length,simplify=T) > 0])
-}
-
-
-getDeterminsticFcsts <- function(fcstPaths,dssFile){
-  
-  #Read in time series container
-  rawTSC <- compileTSC(fcstPaths,dssFile)
-  rawTSC$monthday <- format(eom(rawTSC$date),"dates %d%b") #get end of month values
-  rawTSC$monthday <- gsub("dates 29Feb","dates 28Feb",rawTSC$monthday)#correction for Feb29
-  rawTSC$event <- wateryear(rawTSC$date)
-  rawTSC <- rawTSC[minute(rawTSC$date)==1,] #removing the 00:00 hour, duplicated timestamps
-  #Only want months from Jan-Jun
-  rawTSC <- rawTSC[grepl(paste0(month.abb[1:6],collapse="|"),rawTSC$monthday),]
-  # out[[listIndex]]
-  rawTSCList <- split(rawTSC,rawTSC$B)
-  out <- Map(function(x) dcast(data = unique(x),formula = "event~monthday",value.var="value"),
-                          rawTSCList)
-  
-  #Assigning incremental probabilities
-  out <- lapply(out, function(x){x$incProbs = getIncProbs(x$event); return(na.omit(x))})
-  
-  #correcting list element names so they match FRA
-  names(out) <- fcstBPartKey$fra[match(names(out),fcstBPartKey$det)]
-  return(out)
-}
 
 
 loadElevStor <- function(){
@@ -767,6 +1092,29 @@ getEventData <- function(event,altList_split){
   lapply(out, function(x) x[order(x$wyDate),])
 }
 
+getDeterminsticFcsts <- function(fcstPaths,dssFile){
+  
+  #Read in time series container
+  rawTSC <- compileTSC(fcstPaths,dssFile)
+  rawTSC$monthday <- format(eom(rawTSC$date),"dates %d%b") #get end of month values
+  rawTSC$monthday <- gsub("dates 29Feb","dates 28Feb",rawTSC$monthday)#correction for Feb29
+  rawTSC$event <- wateryear(rawTSC$date)
+  rawTSC <- rawTSC[minute(rawTSC$date)==1,] #removing the 00:00 hour, duplicated timestamps
+  #Only want months from Jan-Jun
+  rawTSC <- rawTSC[grepl(paste0(month.abb[1:6],collapse="|"),rawTSC$monthday),]
+  # out[[listIndex]]
+  rawTSCList <- split(rawTSC,rawTSC$B)
+  out <- Map(function(x) dcast(data = unique(x),formula = "event~monthday",value.var="value"),
+             rawTSCList)
+  
+  #Assigning incremental probabilities
+  out <- lapply(out, function(x){x$incProbs = getIncProbs(x$event); return(na.omit(x))})
+  
+  #correcting list element names so they match FRA
+  names(out) <- fcstBPartKey$fra[match(names(out),fcstBPartKey$det)]
+  return(out)
+}
+
 getBaseYrData <- function(baseYr, altList_split, is5k=F){
   #Retrieves data for a given base year, returning a
   #  nested list of dataframes, by location
@@ -785,3 +1133,34 @@ getBaseYrData <- function(baseYr, altList_split, is5k=F){
 
 #Retrieves the deterministic, incremental probabilities for given water years
 getIncProbs <- function(wys) eventYr[["deterministic_probs"]]$NEW.PROB[match(wys,eventYr[["deterministic_probs"]]$WY)]
+
+
+
+
+### Market Prices ############################
+
+meltPriceDF <- function(priceDF){
+  #priceDF has an 'Event' column and other columns
+  #  named after the months.
+  #Output is a long dataframe that has the month and events paired
+  #  with the price value ($/MWh)
+  if(is.null(priceDF)) return(NULL)
+  out <-  melt(data = priceDF, id.vars = "Event",measure.vars = month.abb, factorsAsStrings = F)
+  out$variable <- as.character(out$variable)
+  names(out)[names(out) == "variable"] <- "month"
+  return(out)
+}
+
+#Load the market prices
+getMP <- function(){
+  
+  mpFiles <- list(
+    '80yr' = NULL,
+    FRA5k= "X:\\CRT2014\\PDT\\WAT\\EntitySupport\\Negotiation Support 2019\\Econ_Losses\\market_prices\\MC_Energy_Prices.csv",
+    FRA50k=NULL
+  )
+  #Retrieve raw data, and return as melted long dataframe
+  rawMP <- lapply(mpFiles, function(x) {if(is.null(x)){return(x)}else{return(read_csv(x))}})
+  lapply(rawMP, meltPriceDF) #melt to long dataframe
+}
+

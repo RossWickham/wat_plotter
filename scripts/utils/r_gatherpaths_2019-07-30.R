@@ -222,6 +222,10 @@ r_gatherpaths <- function(baseDir, in_paths, isFRA = T){
                              event = ifelse(isfra,getFRAEvent( pathSplit$F[k] ),NA),
                              value = tsc$values,
                              stringsAsFactors=F)
+      
+      #Correction for daily data - this is actually wrong.  Don't adjust the timestamp
+      # if(unique(pathSplit$E[k])=="1DAY")
+      #   out[[k]]$date = out[[k]]$date-86400
     }
     
     out <- bind_rows(out)

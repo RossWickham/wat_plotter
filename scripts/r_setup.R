@@ -6,14 +6,24 @@ options(max.print=1000) #limiting number of printouts for lists
 
 cat("\nrunning r_setup")
 
+
+#Retrieving the arguments passes via batch file and assigning to objects
+args = commandArgs(trailingOnly=TRUE)
+defaultHost <- args[1] #as string
+defaultPort <- as.integer(args[2]) #needs to be integer
+baseJavaDir <- args[3]
+
 ### Java Configuration ######################
 #Establishing java configuration prior to loading dssrip
 
 options( java.parameters = "-Xms64m" )
 
 #For testing - only using libraries from Y drive to ensure portable
-if(Sys.getenv("USERNAME") == "g4ecjrsw") .libPaths("Y:\\Dataprocessing_tools\\resources\\R-3.4.2\\library")
-
+#  Also hard-coding java directory so can run manually
+if(Sys.getenv("USERNAME") == "g4ecjrsw") {
+  .libPaths("Y:\\Dataprocessing_tools\\resources\\R-3.4.2\\library")
+  baseJavaDir <- "Y:\\Dataprocessing_tools\\resources\\java64"
+}
 
 if(R.Version()$arch=="x86_64"){
   # use 64-bit .jar and .dll
@@ -90,7 +100,7 @@ suppressPackageStartupMessages( #loading all packages
 
 
 ### Sourcing all Utility scripts ###################
-
+cat("\tSourcing all packages")
 #sources all R scripts in the scripts/utils without the word 'test' in them
 suppressPackageStartupMessages(
 a <- sapply(grep("^(?=.*R)(?!.*test)", dir("scripts/utils",full.names = T,recursive = T), perl=TRUE,value = T),

@@ -23,6 +23,28 @@ renameDFCol <- function(inDF, oldColName,newColName){
   return(inDF)
 }
 
+getCommonNamesInList <- function(xList, exclude=NULL) {
+  #Common names of elements in next list level, excuding those expilcitly defined
+  out <- Reduce(intersect,lapply(xList,names))
+  out[out %!in% exclude]
+}
+
+
+noPartialMatches <- function(patterns, strings) !grepl(paste0(patterns,collapse = "|"),strings) 
+
+getCommonNamesInList_recursive <- function(xList, exclude=NULL,nLevel=1) {
+  #Common names of elements in next list level, excuding those explicitly defined
+  xList <- xList[ noPartialMatches(exclude,names(xList)) ]
+  nLevel=nLevel-1
+  # str(xList)
+  if(nLevel==0){
+    out <- Reduce(intersect,lapply(xList,names))
+    return(out[ noPartialMatches(exclude,out) ])
+  }else{
+    # return( lapply(unlist(xList,recursive = F),getCommonNamesInList_recursive,exclude=exclude,nLevel=nLevel) )
+    return( getCommonNamesInList_recursive(xList=unlist(xList,recursive = F),exclude=exclude,nLevel=nLevel) )
+  }
+}
 
 ### Colors ##########
 
@@ -88,7 +110,6 @@ extractPathParts <- function(inPaths, pathsToExtract=paste0(LETTERS[1:6], collap
     outPath[whichParts-1] <- splitPaths[whichParts]
     return( toupper(paste0("/",paste0(c(outPath), collapse="/"),"/")) )
   }
-  
   return( sapply( strsplit(inPaths,"/"), replacePaths, whichParts=whichParts, simplify = T) )
 }
 

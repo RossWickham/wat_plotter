@@ -4,7 +4,7 @@ title WAT Plotter
 rem This runs the R scripts that launch the WAT Plotter
 
 rem retrieving R and Java configuration
-call r_java_esp_config.bat
+call r_java_config.bat
 
 rem for execution of shiny app
 set rScript=webapp\run.R
@@ -15,8 +15,6 @@ rem set rScript=webapp\test.R
 echo --- Launching WAT Plotter ------
 
 
-set defaultHost=127.0.0.1
-set defaultPort=4456
 set defaultURL=http://%defaultHost%:%defaultPort%/
 
 echo Host IP: %defaultHost%

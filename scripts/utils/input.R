@@ -1,5 +1,7 @@
 library(tcltk)
 
+### Fra to SQL ##############################
+
 chooseFRADir <- function(){
   #Selects a directory
   root = tktoplevel("width" = 1, "height" = 1)
@@ -32,16 +34,3 @@ chooseExtractCSV <- function(baseDir){
 
 
 
-getConnections <- function(sheetName){
-  #Reads the config/connections Excel and reads in uncommented rows
-  require(XLConnect)
-  wb <- loadWorkbook("config/connections.xlsx")
-  if(sheetName %!in% getSheets(wb)){
-    cat(sprintf("\ngetConnections:\tNo sheet '%s' found in Excel file config/connections.xlsx.", sheetName))
-    stop()
-  }
-  #initial read of commented lines
-  rawRead <-  readWorksheet(object = wb,sheet = sheetName,header=F)
-  #re-read, dropping commented rows
-  readWorksheet(object = wb,sheet = sheetName,startRow = sum(left(rawRead[,1],1)=="#",na.rm=T)+2,header=T)
-}

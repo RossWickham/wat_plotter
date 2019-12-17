@@ -1,6 +1,8 @@
 #opening shiny app for cwms esp viewer from batch file
 
-suppressPackageStartupMessages(require(shiny,quietly = T))
+options(warn=-1)
+suppressPackageStartupMessages(library(shiny))
+options(warn=1)
 
 #Retrieving the arguments passes via batch file and assigning to objects
 args = commandArgs(trailingOnly=TRUE)

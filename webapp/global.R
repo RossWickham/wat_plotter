@@ -1,32 +1,112 @@
 
-cat("\nrunning global")
+
 options(warn=-1) #no warnings, they clutters command prompt window.  output uses 'cat'
 
 "%!in%" <- function(x,y) !(x %in% y) #not in operator
 
+
+
+#Testing - only using libraries from V drive to ensure portable
+if(Sys.getenv("USERNAME") == "g4ecjrsw") .libPaths("Y:\\Dataprocessing_tools\\resources\\R-3.4.2\\library")
+
 #assuming in webapp folder if not in base project directory
 if("scripts" %!in% dir()) setwd("..") 
 
-#Testing - only using libraries from Y drive to ensure portable
-if(Sys.getenv("USERNAME") == "g4ecjrsw") .libPaths("Y:\\Dataprocessing_tools\\resources\\R-3.4.2\\library")
+sTime <- Sys.time()
 
-
-#loading from project main directory
+#loading from project main directory and running setup script
 suppressPackageStartupMessages({
   library(shiny)
+  library(shinyWidgets)
   library(DT)
   library(plotly)
   source("scripts/r_setup.R")
 })
 
 
+cat("\nrunning global")
+### Directories and Config File Locations ####################
+
+pathConfigFile <- "config/cached/pathConfig.yaml"
+if(!dir.exists(dirname(pathConfigFile))) dir.create(dirname(pathConfigFile),recursive = T)
+
+#Saved so don't need to update each time
+cachedFcstFile <- "config/cached/fcsts.RData"
+
 ### Connections ######################
-
-#Deterministic results DSS data
-dssConns <- getConnections("DSS_Connections")
-
+cat("\n\tLoading connections.xlsx")
+#Deterministic results DSS data and 
 #FRA results directories
-fraConns <- getConnections("SQL")
+conns <- getConnections("connections")
+#The connection name is optional.  If not assigned, will be same as 'alt'
+conns$connection_name[is.na(conns$connection_name)] <- conns$alt[is.na(conns$connection_name)]
+
+#Tracks all available locations (e.g., Mica-pool/elev for F1) in a nested list
+#  and matched locations between all alternatives
+cat("\n\tDetermining if connections need updating")
+pathConfig <- getPathConfig(conns)
+
+startup_checks("Connections") #Check for data integrity
+
+### Plot Data ###################
+
+#Initializing placeholder for allData, and initializing the metadata
+if(!exists("allData")){
+  allData<-list()
+  allData$meta <- getAltMeta(conns)
+}
+plotData <- p <- NULL
+
+startup_checks("All Data") #Check for data integrity
+
+### PDF Save Settings ########
+
+#color and line type settings for minor grid line
+minGridCol= grey(0.3,0.3)
+minLty = 3
+
+### Run Matrix #################
+
+runMatrix <- readWorksheetFromFile(file = "\\\\coe-nwpnv005por.nwp.ds.usace.army.mil\\CRT_HH\\CRT2014\\PDT\\WAT\\EntitySupport\\Negotiation Support 2019\\CRT_Runmatrix_ALLRuns.xlsx", sheet = "Run Assumptions",startRow = 7)
+names(runMatrix) <- gsub("X","run ",names(runMatrix))
+
+#Flipping so scroll down by run
+runMatrix <- as.data.frame(t( runMatrix)) #transpose
+names(runMatrix) <- runMatrix[1,] #rename using first row
+runMatrix <- runMatrix[-1,] #take of first row since it's used as column headers
+runMatrix <- runMatrix[,grepl("^\\D",names(runMatrix)) ] #keep names that don't start with numbers
+
+
+
+### Forecast and HS  ###############
+cat("\n\tLoading Forecasts")
+#hydrologic sampler event-year pairing
+hsWb <- loadWorkbook("config/HS_Event_Year_Mapping.xlsx")
+eventYr <- list()
+eventYr[["fiveK"]] <- readWorksheet(hsWb,"event-year (5k)")
+eventYr[["fiftyK"]] <- readWorksheet(hsWb,"event-year (50k)")
+
+#Reading in deterministic probabilities
+eventYr[["deterministic_probs"]] <- readWorksheet(hsWb,"probs")
+
+
+#Controls which forecast locations are loaded
+#translation between how determinstic fcst DSS are stored and FRA
+fcstBPartKey <- data.frame(det=c("ARDB","BRN","DCDB","DWR",
+                                 "HGH","LIB","MCDB","TDA"),
+                           fra=c("ARROW LAKES_IN", "BROWNLEE_IN","DUNCAN_IN","DWORSHAK_IN",
+                                 "HUNGRY HORSE_IN","LIBBY_IN","MICA_IN","THE DALLES_IN"),
+                           stringsAsFactors = F)
+
+
+#Retrieving forecast datasets - 5k, 50k, and 80yr
+#  These are used for the quintile plots
+fcsts <- loadFcsts()
+roundedFcstTable <- roundFcstTbl(fcsts$`80yr`$`THE DALLES_IN`) #created rounded forecast tale for viewing
+
+#Check the forecasts are loaded properly
+startup_checks("Forecast and HS")
+
 
 ### Metrics #####################
 
@@ -43,29 +123,6 @@ metricsToCompute <- data.frame(metric=    c("min", "1%",        "10%", "25%",   
 metricsToCompute$baseRLty <- plotlyLtyToGraphicsLty(metricsToCompute$lty_plotly)
 
 
-
-### PDF Save Settings ########
-
-#color and line type settings for minor grid line
-minGridCol= grey(0.3,0.3)
-minLty = 3
-
-
-### Forecast and HS  ###############
-
-#hydrologic sampler event-year pairing
-hsWb <- loadWorkbook("config/HS_Event_Year_Mapping.xlsx")
-eventYr <- list()
-eventYr[["fiveK"]] <- readWorksheet(hsWb,"event-year (5k)")
-eventYr[["fiftyK"]] <- readWorksheet(hsWb,"event-year (50k)")
-
-#Reading in deterministic probabilities
-eventYr[["deterministic_probs"]] <- readWorksheet(hsWb,"probs")
-
-#Retrieving forecast datasets
-fcsts <- loadFcsts()
-
-
 ### WY Ranking ##############################
 
 #wyRanking:
@@ -78,16 +135,20 @@ wyRanking <- list(
   #5 groupings of 20% 
   five_groups = data.frame(category=c('<20%','20-40%','40-60%','60-80%','>80%'),
                            percentage=rep(20,5),
-                           html_lty=c("dash","dot","solid","dot","dash"),
-                           lty=c(3,2,1,2,3),
+                           lty_plotly=c("dash","dot","solid","dot","dash"),
                            stringsAsFactors = F),
   #3 groups: <20% (dry); 20-80% (avg); >80% (wet)
   three_groups =  data.frame(category=c("dry","average","wet"),
                              percentage=c(20,60,20),
-                             lty=c("dash","solid","dot"),
+                             lty_plotly=c("dash","solid","dot"),
                              stringsAsFactors = F)
 )
 
+#computing cumulative probabilities for each group to facilitate characterization
+wyRanking <- lapply(wyRanking,computeCumulativeP)
+
+#Adding the base R line types
+wyRanking <- lapply(wyRanking,function(x) {x$baseRLty <- plotlyLtyToGraphicsLty(x$lty_plotly); return(x)})
 
 ### F Part Handling ###########################################
 
@@ -136,7 +197,7 @@ replaceStringFromDict <- function(fPartDictionary){
   if( length(watFPart) == 0 ) watFPart <- NA #setting to NA if no match
   if( is.na(watFPart)  )
     warning(sprintf(paste0("\n\tNo F part match could be found for model",
-                           " '%s' in 'modelDict' object (defined in r_setup.R script).\n\t",
+                           " '%s' in 'modelDict' object (defined in global.R script).\n\t",
                            "  Using original string ('%s') to match F parts in in DSS file."),
                     fPartDictionary,fPartDictionary))
   ifelse( is.na(watFPart),fPartDictionary, watFPart)
@@ -157,4 +218,8 @@ pMargins <- list(l=100)
 #Scripts to check that necessary data are available and config is defined correctly
 # source("scripts/startup_checks.R")
 
-cat("\n\nBrowser is ready - refresh or open new browser session")
+startupTime <- unclass(Sys.time()-sTime)
+cat(sprintf("\nStartup time was: %.1f %s",startupTime, attr(startupTime,"units") ))
+
+cat(paste0("\n\nBrowser is ready - refresh or open new browser session",
+           "\n\tNote: changes made to connections.xlsx file will not be actively updated in this session."))

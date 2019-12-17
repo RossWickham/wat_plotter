@@ -2,3 +2,11 @@
 .Rhistory
 .RData
 .Ruserdata
+
+
+#Config file
+config/connections.xlsx
+
+#testing
+#=======
+test_output/
